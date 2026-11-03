@@ -22,6 +22,7 @@ local Gamebook = PluginBase:extend{
     name      = "gamebook",
     menu_text = _("Gamebooks"),
     menu_hint = "tools",
+    party_mode = true,
 }
 
 function Gamebook:createScreen()
