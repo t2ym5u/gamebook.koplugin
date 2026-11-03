@@ -21,8 +21,10 @@ local VerticalSpan    = require("ui/widget/verticalspan")
 local _               = require("i18n")
 local T               = require("ffi/util").template
 
-local MenuHelper = require("menu_helper")
-local ScreenBase = require("screen_base")
+local ButtonDialog = require("ui/widget/buttondialog")
+local MenuHelper   = require("menu_helper")
+local Party        = require("party")
+local ScreenBase   = require("screen_base")
 
 local function lrequire(name)
     local key = _dir .. name
@@ -34,6 +36,8 @@ end
 
 local Game    = lrequire("game")
 local Stories = lrequire("stories")
+local Turns   = lrequire("turns")
+local Votes   = lrequire("votes")
 
 local DeviceScreen = Device.screen
 
@@ -73,6 +77,34 @@ Endurance à 0 : c'est la mort. Alors — ou à n'importe quelle fin — Recomme
 La progression est sauvegardée automatiquement, séparément pour chaque histoire. Le mode indulgent (menu) ajoute un bouton Retour qui annule le dernier pas, même une mort, et permet de revenir à vos signets.
 
 Écrivez vos propres histoires : voir le README.md de l'extension. Placez-les dans koreader/data/gamebook/.
+]]
+
+local RULES_PARTY_EN = [[
+Gamebooks · multiplayer — Rules
+
+Setup: lay the reader in the middle of the table and pick a story. In the menu: Players (2 to 8) and Player names, Reader changes (after every section, or every 2, 3 or 5 sections) and Vote (on or off). The whole table plays one hero together.
+
+Who does what: one player is the reader — the heading over the text shows who ("§ 12 · Reader: Alice"). The reader reads the section aloud and handles the reader. When the story moves on to a new section, the book passes to the next player round the table (or after 2, 3 or 5 sections). Next reader, in the menu, passes it at once.
+
+Choosing: when a section offers several ways on and Vote is on, everyone raises a hand for the option they want, and the reader taps that option once per hand — each tap is one vote, shown under it. Then Decide: the option with the most votes is taken. A tie, or no vote at all, lets the reader decide among the tied options (or all of them). Clear votes starts the count again. With Vote off, or when there is only one way on, a tap takes the choice at once. A greyed-out choice needs an item, a clue or gold you don't have yet.
+
+Dice: in most stories the hero has Skill, Stamina and Luck (Sheet shows them with the gold and items). The reader rolls for the table, and the line above the buttons says who rolled. Fight: each round you and the enemy roll two dice and add Skill; the higher total wounds the other for 2 Stamina, a tie wounds nobody; some fights let you flee for 2 Stamina. Test your Skill or Luck: two dice at or under it succeed, and each Luck test uses up 1 Luck.
+
+The end: there are no scores — the table wins or loses together. Stamina at 0 is death; at any ending Start again rolls a new hero and goes back to the first section. Forgiving mode adds Back (undo the last step) and bookmarks. The table's adventures are saved apart from your solo ones.
+]]
+
+local RULES_PARTY_FR = [[
+Livres-jeux · à plusieurs — Règles
+
+Mise en place : posez la liseuse au milieu de la table et choisissez une histoire. Dans le menu : Joueurs (2 à 8) et Noms des joueurs, Changement de lecteur (après chaque paragraphe, ou tous les 2, 3 ou 5 paragraphes) et Vote (actif ou non). Toute la table joue ensemble un seul héros.
+
+Qui fait quoi : un joueur est le lecteur — le titre au-dessus du texte indique qui (« § 12 · Lecteur : Alice »). Le lecteur lit le paragraphe à voix haute et tient la liseuse. Quand l'histoire passe à un nouveau paragraphe, le livre passe au joueur suivant autour de la table (ou après 2, 3 ou 5 paragraphes). Lecteur suivant, dans le menu, le fait passer tout de suite.
+
+Choisir : quand un paragraphe propose plusieurs suites et que le Vote est actif, chacun lève la main pour l'option qu'il veut, et le lecteur touche cette option une fois par main levée — chaque appui compte une voix, affichée dessous. Puis Décider : l'option qui a le plus de voix l'emporte. En cas d'égalité, ou sans aucune voix, le lecteur décide parmi les options à égalité (ou toutes). Effacer les votes recommence le compte. Sans le vote, ou quand il n'y a qu'une suite, un appui prend le choix aussitôt. Un choix grisé demande un objet, un indice ou de l'or que vous n'avez pas encore.
+
+Les dés : dans la plupart des histoires, le héros a Habileté, Endurance et Chance (Feuille les montre avec l'or et les objets). Le lecteur lance pour la table, et la ligne au-dessus des boutons dit qui a lancé. Combat : à chaque assaut, vous et l'adversaire lancez deux dés et ajoutez l'Habileté ; le plus haut total blesse l'autre de 2 points d'Endurance, une égalité ne blesse personne ; certains combats permettent de fuir pour 2 points d'Endurance. Tentez votre Habileté ou votre Chance : deux dés inférieurs ou égaux réussissent, et chaque tentative de Chance coûte 1 point de Chance.
+
+La fin : pas de score — la table gagne ou perd ensemble. Endurance à 0 : c'est la mort ; à n'importe quelle fin, Recommencer tire un nouveau héros et revient au premier paragraphe. Le mode indulgent ajoute Retour (annuler le dernier pas) et les signets. Les aventures de la table sont sauvegardées à part des vôtres.
 ]]
 
 local STAT_LABELS = {
@@ -169,17 +201,35 @@ function GamebookScreen:init()
     local ui_lang = _.lang() == "fr" and "fr" or "en"
     self.lang      = p:getSetting("lang", ui_lang)
     self.forgiving = p:getSetting("forgiving", false)
+    self.party     = p.launch_mode == "party"
+    self:scanStories()
+    self:loadSaves()
+    ScreenBase.init(self)
+end
 
-    local saved = p:loadState() or {}
+-- Solo and multiplayer adventures are saved apart (a table's game doesn't
+-- move the bookmark of the one you read alone).
+function GamebookScreen:stateKey()
+    return self.party and "party_state" or nil
+end
+
+function GamebookScreen:loadSaves()
+    local p = self.plugin
+    local saved = p:loadState(self:stateKey()) or {}
     self.saves     = type(saved.games) == "table" and saved.games or {}
     self.bookmarks = type(saved.bookmarks) == "table" and saved.bookmarks or {}
-
-    self:scanStories()
+    self.game, self.story, self.current, self.page = nil, nil, nil, nil
+    if self.party then
+        self.players = Party.loadPlayers(p, Party.loadCount(p))
+        self.turns = Turns.restore(saved.turns, #self.players, p:getSetting("party_every", 1))
+        self.vote_on = p:getSetting("party_vote", true)
+        self.saved_votes = saved.votes
+        self.roller = saved.roller
+    end
     self.phase = "library"
     if saved.current and saved.phase == "play" then
         self:openStory(saved.current, true)
     end
-    ScreenBase.init(self)
 end
 
 function GamebookScreen:storyDirs()
@@ -203,16 +253,31 @@ function GamebookScreen:serializeState()
     if self.game and self.current then
         self.saves[self.current] = self.game:serialize()
     end
-    return {
+    local t = {
         current   = self.current,
         phase     = self.phase,
         games     = self.saves,
         bookmarks = self.bookmarks,
     }
+    if self.party then
+        t.turns  = Turns.copy(self.turns)
+        t.votes  = self.votes and Votes.copy(self.votes) or nil
+        t.roller = self.roller
+    end
+    return t
 end
 
 function GamebookScreen:save()
-    self.plugin:saveState(self:serializeState())
+    self.plugin:saveState(self:serializeState(), self:stateKey())
+end
+
+-- ScreenBase's version saves under the solo key.
+function GamebookScreen:closeScreen()
+    if not self.party then return ScreenBase.closeScreen(self) end
+    self:save()
+    self.plugin:onScreenClosed()
+    UIManager:close(self)
+    UIManager:setDirty(nil, "full")
 end
 
 -- ---------------------------------------------------------------------------
@@ -310,10 +375,100 @@ function GamebookScreen:onNewGame()
 end
 
 function GamebookScreen:onAction(a)
+    local reader = self.party and self:readerName()
     local r = self.game:act(a)
     if not r then return end
+    if self.party then
+        if r.kind == "moved" then
+            -- A new section: a new reader (every N sections), a new vote.
+            self.roller = nil
+            self.votes = nil
+            Turns.step(self.turns)
+        else
+            self.roller = reader
+        end
+    end
     self:save()
     self:rebuild()
+end
+
+-- ---------------------------------------------------------------------------
+-- Multiplayer: the reader and the vote
+-- ---------------------------------------------------------------------------
+
+function GamebookScreen:readerName()
+    return self.players[self.turns.current] or Party.defaultName(self.turns.current)
+end
+
+function GamebookScreen:onNextReader()
+    Turns.pass(self.turns)
+    self:save()
+    self:rebuild()
+end
+
+-- The choices the table can vote on here (none when a vote makes no sense:
+-- vote off, a fight, a single way on).
+function GamebookScreen:votableChoices()
+    if not (self.party and self.vote_on and self.game and not self.game:isOver()) then return nil end
+    local ids = {}
+    for _i, a in ipairs(self.game:actions()) do
+        if a.kind == "choice" and a.enabled then ids[#ids + 1] = a.index end
+    end
+    if #ids < 2 then return nil end
+    return ids
+end
+
+-- The tally of this very page (section and step), restored or new.
+function GamebookScreen:currentVotes()
+    local s = self.game.s
+    local key = s.section .. ":" .. (s.steps or 0)
+    if not self.votes or self.votes.key ~= key then
+        self.votes = Votes.restore(self.saved_votes, key)
+        self.saved_votes = nil
+    end
+    return self.votes
+end
+
+function GamebookScreen:addVote(index)
+    Votes.add(self:currentVotes(), index)
+    self:save()
+    self:rebuild()
+end
+
+function GamebookScreen:clearVotes()
+    Votes.clear(self:currentVotes())
+    self:save()
+    self:rebuild()
+end
+
+function GamebookScreen:choiceAction(index)
+    for _i, a in ipairs(self.game:actions()) do
+        if a.kind == "choice" and a.index == index then return a end
+    end
+end
+
+-- Majority wins; on a tie (or with no vote) the reader picks.
+function GamebookScreen:onDecide()
+    local ids = self:votableChoices()
+    if not ids then return end
+    local win, pool = Votes.result(self:currentVotes(), ids)
+    if win then return self:onAction(self:choiceAction(win)) end
+    local dlg
+    local rows = {}
+    for _i, id in ipairs(pool) do
+        local a = self:choiceAction(id)
+        rows[#rows + 1] = { { text = a.text, callback = function()
+            UIManager:close(dlg)
+            self:onAction(a)
+        end } }
+    end
+    local total = Votes.total(self:currentVotes())
+    dlg = ButtonDialog:new{
+        title       = T(total > 0 and _("Tie: %1 decides") or _("%1 decides"), self:readerName()),
+        title_align = "center",
+        buttons     = rows,
+    }
+    UIManager:show(dlg)
 end
 
 function GamebookScreen:onBack()
@@ -440,6 +595,49 @@ function GamebookScreen:openBookmarks()
     }
 end
 
+local function everyLabel(n)
+    return n == 1 and _("Every section") or T(_("Every %1 sections"), n)
+end
+
+function GamebookScreen:openEveryMenu()
+    local items = {}
+    for _i, n in ipairs(Turns.EVERY_CHOICES) do items[#items + 1] = { id = n, text = everyLabel(n) } end
+    MenuHelper.openPickerMenu{
+        title = _("Reader changes"), items = items, current_id = self.turns.every, parent = self,
+        on_select = function(n)
+            Turns.setEvery(self.turns, n)
+            self.plugin:saveSetting("party_every", n)
+            self:save()
+            self:rebuild()
+        end,
+    }
+end
+
+function GamebookScreen:setPlayerCount(n)
+    self.players = Party.loadPlayers(self.plugin, n)
+    Turns.resize(self.turns, n)
+    self:save()
+    self:rebuild()
+end
+
+function GamebookScreen:openModeMenu()
+    MenuHelper.openPickerMenu{
+        title      = _("Mode"),
+        items      = { { id = "solo", text = _("Solo") }, { id = "party", text = _("Multiplayer") } },
+        current_id = self.party and "party" or "solo",
+        parent     = self,
+        on_select  = function(mode)
+            if (mode == "party") == self.party then return end
+            self:save()
+            self.plugin.launch_mode = mode
+            self.party = mode == "party"
+            self:loadSaves()
+            self:save()
+            self:rebuild()
+        end,
+    }
+end
+
 function GamebookScreen:menuItems()
     local items = {
         { text = _("New game"), callback = function() self:onNewGame() end },
@@ -450,16 +648,37 @@ function GamebookScreen:menuItems()
         callback = function() self:onLibrary() end,
     }
     items[#items + 1] = { text = T(_("Language: %1"), self.lang:upper()), callback = function() self:openLangMenu() end }
+    if self.party then
+        local p = self.plugin
+        items[#items + 1] = { text = T(_("Players: %1"), #self.players), callback = function()
+            Party.pickCount(p, function(n) self:setPlayerCount(n) end, self)
+        end }
+        items[#items + 1] = { text = _("Player names"), callback = function()
+            Party.editPlayers(p, self.players, function() self:rebuild() end, self)
+        end }
+        items[#items + 1] = { text = T(_("Reader changes: %1"), everyLabel(self.turns.every)),
+                              callback = function() self:openEveryMenu() end }
+        items[#items + 1] = { text = T(_("Vote: %1"), self.vote_on and _("On") or _("Off")), callback = function()
+            self.vote_on = not self.vote_on
+            p:saveSetting("party_vote", self.vote_on)
+            self:rebuild()
+        end }
+    end
     items[#items + 1] = {
         text = T(_("Forgiving mode: %1"), self.forgiving and _("On") or _("Off")),
         callback = function() self:toggleForgiving() end,
     }
+    items[#items + 1] = { text = T(_("Mode: %1"), self.party and _("Multiplayer") or _("Solo")),
+                          callback = function() self:openModeMenu() end }
+    if self.party and self.phase == "play" then
+        items[#items + 1] = { text = _("Next reader"), callback = function() self:onNextReader() end }
+    end
     if self.phase == "play" then
         items[#items + 1] = { text = _("Character sheet"), callback = function() self:showSheet() end }
         items[#items + 1] = { text = _("Add bookmark"), callback = function() self:addBookmark() end }
         items[#items + 1] = { text = _("Bookmarks"), callback = function() self:openBookmarks() end }
     end
-    items[#items + 1] = self:makeRulesButtonConfig(RULES_EN, RULES_FR)
+    items[#items + 1] = self:makeModeRulesButtonConfig({ solo = { RULES_EN, RULES_FR }, party = { RULES_PARTY_EN, RULES_PARTY_FR } })
     return items
 end
 
@@ -529,6 +748,9 @@ function GamebookScreen:resultText()
         local e = g:enemies()[s.fight.enemy]
         lines[#lines + 1] = T(_("%1 — Skill %2 · Stamina %3"), e.name, e.skill, s.fight.stamina)
     end
+    if r and self.party and self.roller then
+        table.insert(lines, 1, T(_("Rolled by %1"), self.roller))
+    end
     if #lines == 0 then return nil end
     return table.concat(lines, "\n")
 end
@@ -566,6 +788,16 @@ function GamebookScreen:buildControls()
     local row = {}
     if self.page then
         row[1] = { text = _("Close"), callback = function() self:closePage() end }
+    elseif self.phase == "play" and self:votableChoices() then
+        -- The vote: the choices count the hands, the bar closes it.
+        row[#row + 1] = { text = _("Sheet"), callback = function() self:showSheet() end }
+        if self.forgiving then
+            row[#row + 1] = { text = _("Back"), enabled = self.game:canGoBack(),
+                              callback = function() self:onBack() end }
+        end
+        row[#row + 1] = { text = _("Clear votes"), enabled = Votes.total(self:currentVotes()) > 0,
+                          callback = function() self:clearVotes() end }
+        row[#row + 1] = { text = _("Decide"), callback = function() self:onDecide() end }
     elseif self.phase == "play" then
         row[#row + 1] = { text = _("Sheet"), callback = function() self:showSheet() end }
         if self.forgiving then
@@ -740,17 +972,28 @@ function GamebookScreen:buildPlay(bw, bh, base)
     if s.over then
         specs[1] = { text = self:endingText(), bold = true, enabled = true, plain = true }
     else
+        local voting = self:votableChoices() and self:currentVotes()
         for _i, a in ipairs(g:actions()) do
+            local text, cb = self:actionText(a), function() self:onAction(a) end
+            if voting and a.kind == "choice" and a.enabled then
+                local n = Votes.get(voting, a.index)
+                if n > 0 then text = text .. "\n" .. T(_("Votes: %1"), n) end
+                cb = function() self:addVote(a.index) end
+            end
             specs[#specs + 1] = {
-                text = self:actionText(a), enabled = a.enabled,
+                text = text, enabled = a.enabled,
                 bold = a.kind ~= "choice",
-                callback = function() self:onAction(a) end,
+                callback = cb,
             }
         end
     end
     local gap = Size.span.vertical_large
+    -- Multiplayer: who reads, where the whole table sees it (the status
+    -- line is full with the character sheet already).
+    local head_text = T(_("§ %1"), s.section)
+    if self.party then head_text = self:joinStatus(head_text, T(_("Reader: %1"), self:readerName())) end
     local header = TextWidget:new{
-        text = T(_("§ %1"), s.section), face = pxFace(math.floor(22 * base), "tfont"), max_width = bw,
+        text = head_text, face = pxFace(math.floor(22 * base), "tfont"), max_width = bw,
     }
     local result_text = self:resultText()
     local result

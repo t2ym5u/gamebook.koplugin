@@ -31,6 +31,22 @@ luck — and start again when it all goes wrong.
 - Interface in English, French, Spanish and German (follows KOReader's
   language). The *Language* setting picks which stories are listed.
 
+## Multiplayer
+
+*Gamebooks · multiplayer* (Tools → Games → Party & quiz, or menu → *Mode*):
+one player reads aloud, the table decides.
+
+- 2 to 8 players, names typed once and remembered. The heading shows who
+  reads ("§ 12 · Reader: Alice"); the book passes to the next player after
+  every section, or every 2, 3 or 5 (*Reader changes*). *Next reader* passes
+  it by hand.
+- **Vote** (on by default): at a choice the reader taps each option once per
+  raised hand; *Decide* takes the majority. A tie, or no vote, lets the reader
+  decide. *Clear votes* starts again. With Vote off, a tap takes the choice.
+- Dice and fights are rolled by the reader ("Rolled by Alice"). No scores:
+  the table wins or loses together. Multiplayer adventures are saved apart
+  from solo ones.
+
 ## Rules
 
 - Read the section and tap a choice. Some choices need an item, a clue you

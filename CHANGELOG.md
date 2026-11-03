@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.0] - 2026-11-02
+
+### Added
+- Multiplayer mode: also listed as "Gamebooks · multiplayer" under Tools →
+  Games → Party & quiz, and switchable in the game (menu → Mode). One player
+  reads aloud — "Reader: Alice" heads the page — and the book passes to the
+  next player after every section, or every 2, 3 or 5 sections (Reader
+  changes); Next reader passes it by hand. At a choice the table votes: the
+  reader taps an option once per raised hand, Decide takes the majority, and
+  a tie (or no vote) lets the reader decide. Vote can be turned off. Dice
+  results say who rolled. The table's adventures are saved apart from the
+  solo ones.
+- Separate multiplayer rules (Rules opens the rules of the mode played, with
+  a button to read the other mode's).
+
 ## [1.0.1] - 2026-11-02
 
 ### Changed
