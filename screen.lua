@@ -198,8 +198,7 @@ local GamebookScreen = ScreenBase:extend{}
 
 function GamebookScreen:init()
     local p = self.plugin
-    local ui_lang = _.lang() == "fr" and "fr" or "en"
-    self.lang      = p:getSetting("lang", ui_lang)
+    self.lang      = p:getLang({ "fr", "en" })
     self.forgiving = p:getSetting("forgiving", false)
     self.party     = p.launch_mode == "party"
     self:scanStories()
@@ -503,7 +502,7 @@ function GamebookScreen:openLangMenu()
         parent     = self,
         on_select  = function(lang)
             self.lang = lang
-            self.plugin:saveSetting("lang", lang)
+            self.plugin:setLang(lang)
             local e = self.current and self:entryFor(self.current)
             if not (e and (not e.lang or e.lang == lang)) then
                 self.phase = "library"
